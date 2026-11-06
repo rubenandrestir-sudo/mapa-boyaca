@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mapa de Boyacá: hospitales y veredas</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body, #mapa { height: 100%; margin: 0; }
+    #estado {
+      position: absolute; z-index: 1000; left: 50%; top: 12px; transform: translateX(-50%);
+      background: #fff; padding: 6px 12px; border-radius: 4px; font: 14px system-ui, sans-serif;
+      box-shadow: 0 1px 4px rgba(0,0,0,.3);
+    }
+    #estado.oculto { display: none; }
+  </style>
+</head>
+<body>
+  <div id="mapa"></div>
+  <div id="estado">Cargando capas…</div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const mapa = L.map("mapa").setView([5.54, -73.36], 8);   // Boyacá
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap"
+    }).addTo(mapa);
+
+    const BASE = "https://services6.arcgis.com/Ex2fmFOuTOHRZtML/ArcGIS/rest/services/";
+    const estado = document.getElementById("estado");
+
+    // ---- Capa 1: hospitales (puntos) ----
+    const urlHospitales = BASE + "Hospitales_Boyac%C3%A1/FeatureServer/0/query"
+      + "?where=1%3D1&outFields=Nombre,NOM_MPIO&outSR=4326&f=geojson";
+
+    // ---- Capa 2: veredas (polígonos) ----
+    // Si el nombre de los campos difiere, abre la URL sin outFields (outFields=*) y ajusta.
+    // maxAllowableOffset simplifica la geometría para que cargue rápido.
+    const urlVeredas = BASE + "Veredas_Boyaca_2024/FeatureServer/0/query"
+      + "?where=1%3D1&outFields=*&outSR=4326&maxAllowableOffset=0.001&f=geojson";
+
+    const capaHospitales = L.geoJSON(null, {
+      onEachFeature: (f, layer) =>
+        layer.bindPopup(`<b>${f.properties.Nombre}</b><br>${f.properties.NOM_MPIO}`)
+    });
+
+    const capaVeredas = L.geoJSON(null, {
+      style: { color: "#1b7f5c", weight: 1, fillColor: "#7fcf9f", fillOpacity: 0.25 },
+      onEachFeature: (f, layer) => {
+        const p = f.properties;
+        // Muestra todos los atributos: sirve para descubrir los nombres de campo reales
+        const filas = Object.entries(p)
+          .filter(([k]) => !/^(OBJECTID|Shape)/i.test(k))
+          .map(([k, v]) => `<b>${k}</b>: ${v}`).join("<br>");
+        layer.bindPopup(filas);
+        layer.on("mouseover", () => layer.setStyle({ weight: 2, fillOpacity: 0.5 }));
+        layer.on("mouseout",  () => capaVeredas.resetStyle(layer));
+      }
+    });
+
+    L.control.layers(null, {
+      "Veredas (polígonos)": capaVeredas,
+      "Hospitales (puntos)": capaHospitales
+    }, { collapsed: false }).addTo(mapa);
+
+    // Veredas debajo, hospitales encima
+    capaVeredas.addTo(mapa);
+    capaHospitales.addTo(mapa);
+
+    function cargar(url, capa, nombre) {
+      return fetch(url)
+        .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+        .then(geo => {
+          if (geo.error) throw new Error(geo.error.message);
+          capa.addData(geo);
+        })
+        .catch(e => console.error(nombre, e));
+    }
+
+    Promise.all([
+      cargar(urlHospitales, capaHospitales, "Hospitales"),
+      cargar(urlVeredas, capaVeredas, "Veredas")
+    ]).then(() => {
+      const n = capaHospitales.getLayers().length, v = capaVeredas.getLayers().length;
+      estado.textContent = `${n} hospitales · ${v} veredas`;
+      setTimeout(() => estado.classList.add("oculto"), 4000);
+    });
+  </script>
+</body>
+</html>
